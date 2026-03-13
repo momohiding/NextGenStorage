@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nextgen-oss"
+version = "0.2.0"
+description = "Unified object storage abstraction for NextGen (COS/OSS/S3)"
+requires-python = ">=3.8"
+dependencies = [
+    "boto3>=1.28.0",
+]
+
+[project.optional-dependencies]
+cos-sts = ["qcloud-python-sts>=3.1.0"]
+oss-sts = ["alibabacloud-sts20150401>=1.1.0", "alibabacloud-tea-openapi>=0.3.0"]
+all = ["nextgen-oss[cos-sts,oss-sts]"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
