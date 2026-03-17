@@ -476,6 +476,76 @@ class StorageClient:
         logger.info(f"Copy done: {dst_key}")
         return dst_key
 
+    def copy_directory(
+        self,
+        bucket: Optional[str],
+        src_prefix: str,
+        dst_prefix: str,
+        src_bucket: Optional[str] = None,
+        max_workers: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """
+        复制远端目录（基于前缀的 server-side copy，不经过本地）
+
+        遍历 src_prefix 下的所有对象，逐个调用 copy_object 复制到 dst_prefix 下，
+        保持相对路径结构不变。
+
+        :param bucket: 目标桶（None 则使用 default_bucket）
+        :param src_prefix: 源前缀（如 "user_a/result/task_001/"）
+        :param dst_prefix: 目标前缀（如 "user_b/result/task_002/"）
+        :param src_bucket: 源桶（None 则与 bucket 相同）
+        :param max_workers: 并发线程数
+        :return: 每个文件的复制结果列表
+            [{"src_key": ..., "dst_key": ..., "status": "ok"/"error", "error": ...}]
+        """
+        bucket = self._resolve_bucket(bucket)
+        src_bucket = src_bucket or bucket
+
+        # 列出源前缀下的所有对象
+        objects = self.list_objects(src_bucket, prefix=src_prefix)
+        if not objects:
+            logger.info(f"No objects found under prefix: {src_prefix}")
+            return []
+
+        # 规范化前缀（确保以 / 结尾）
+        src_prefix_normalized = src_prefix.rstrip("/") + "/"
+        dst_prefix_normalized = dst_prefix.rstrip("/") + "/"
+
+        results: List[Dict[str, Any]] = []
+
+        def _copy_one(obj: Dict[str, Any]) -> Dict[str, Any]:
+            src_key = obj["Key"]
+            if src_key.endswith("/"):
+                return {"src_key": src_key, "dst_key": "", "status": "skipped"}
+            # 计算目标 key：保持相对路径
+            rel_path = src_key[len(src_prefix_normalized):] if src_key.startswith(src_prefix_normalized) else src_key
+            dst_key = dst_prefix_normalized + rel_path
+            try:
+                self.copy_object(
+                    bucket=bucket,
+                    src_key=src_key,
+                    dst_key=dst_key,
+                    src_bucket=src_bucket,
+                )
+                return {"src_key": src_key, "dst_key": dst_key, "status": "ok"}
+            except Exception as e:
+                logger.error(f"Copy failed {src_key} -> {dst_key}: {e}")
+                return {"src_key": src_key, "dst_key": dst_key, "status": "error", "error": str(e)}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_copy_one, obj): obj for obj in objects}
+            for future in as_completed(futures):
+                results.append(future.result())
+
+        ok = sum(1 for r in results if r["status"] == "ok")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+        failed = sum(1 for r in results if r["status"] == "error")
+        logger.info(
+            f"Copy directory done: {ok} ok, {skipped} skipped, {failed} failed "
+            f"({src_prefix} -> {dst_prefix})"
+        )
+        return results
+
     def batch_download(
         self,
         bucket: Optional[str],
