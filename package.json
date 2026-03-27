@@ -1,12 +1,31 @@
 {
   "name": "nextgen-storage",
   "version": "0.2.0",
+  "type": "module",
   "description": "Unified object storage abstraction for JS (COS/OSS/S3/MinIO) - mirrors Python nextgen-oss",
   "main": "js/src/index.js",
   "module": "js/src/index.js",
+  "exports": {
+    ".": {
+      "import": "./js/src/index.js",
+      "default": "./js/src/index.js"
+    },
+    "./StorageClient": {
+      "import": "./js/src/StorageClient.js",
+      "default": "./js/src/StorageClient.js"
+    },
+    "./providers": {
+      "import": "./js/src/providers.js",
+      "default": "./js/src/providers.js"
+    }
+  },
   "files": [
     "js/src/"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/momohiding/NextGenStorage.git"
+  },
   "keywords": [
     "s3",
     "cos",
