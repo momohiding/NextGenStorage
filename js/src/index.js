@@ -11,10 +11,10 @@
  *   const blob = await client.getObjectAsBlob('path/to/file.png');
  */
 
-export { default as StorageClient } from './StorageClient';
+export { default as StorageClient } from './StorageClient.js';
 export {
   getProvider,
   registerProvider,
   detectProvider,
   PROVIDER_REGISTRY,
-} from './providers';
+} from './providers.js';

@@ -8,7 +8,7 @@
 
 import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { getProvider, detectProvider } from './providers';
+import { getProvider, detectProvider } from './providers.js';
 
 export default class StorageClient {
   /**
