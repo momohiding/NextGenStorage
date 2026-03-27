@@ -6,7 +6,7 @@
  * 腾讯云 COS / 阿里云 OSS / AWS S3 / MinIO 等均可使用同一套接口。
  */
 
-import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getProvider, detectProvider } from './providers';
 
@@ -259,6 +259,137 @@ export default class StorageClient {
       ...(contentType ? { ContentType: contentType } : {}),
     });
     return this._client.send(command);
+  }
+
+  // ======================== Node.js 文件操作（仅 Node.js 环境可用） ========================
+
+  /**
+   * 下载文件到本地路径（Node.js 环境）
+   * @param {string} key - 对象键
+   * @param {string} localPath - 本地保存路径
+   * @param {string} [bucketName] - bucket
+   * @returns {Promise<string>} 本地文件绝对路径
+   */
+  async downloadToFile(key, localPath, bucketName = null) {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { pipeline } = await import('stream/promises');
+
+    // 确保目录存在
+    const dir = path.default.dirname(path.default.resolve(localPath));
+    fs.default.mkdirSync(dir, { recursive: true });
+
+    const response = await this.getObject(key, bucketName);
+
+    // SDK v3 在 Node.js 中返回的 Body 是 Readable stream
+    const writeStream = fs.default.createWriteStream(localPath);
+    await pipeline(response.Body, writeStream);
+
+    const absPath = path.default.resolve(localPath);
+    const stat = fs.default.statSync(absPath);
+    return absPath;
+  }
+
+  /**
+   * 从本地文件上传（Node.js 环境）
+   *
+   * 注意 OSS 兼容性（参考 memory:m0bvh35l）：
+   * - 使用 putObject + Buffer（而非 stream），避免 chunked encoding
+   * - 显式传 ContentLength
+   *
+   * @param {string} key - 对象键
+   * @param {string} localPath - 本地文件路径
+   * @param {Object} [options={}]
+   * @param {string} [options.contentType] - MIME 类型
+   * @param {string} [options.bucket] - bucket
+   * @returns {Promise<Object>} 上传结果
+   */
+  async uploadFromFile(key, localPath, { contentType, bucket } = {}) {
+    const fs = await import('fs');
+
+    // 读取整个文件为 Buffer（OSS 兼容：避免 stream 导致 chunked encoding）
+    const data = fs.default.readFileSync(localPath);
+    const fileSize = data.length;
+
+    const command = new PutObjectCommand({
+      Bucket: bucket || this._bucket,
+      Key: key,
+      Body: data,
+      ContentLength: fileSize,
+      ...(contentType ? { ContentType: contentType } : {}),
+    });
+    return this._client.send(command);
+  }
+
+  /**
+   * 列出前缀下所有对象
+   * @param {string} prefix - 前缀
+   * @param {string} [bucketName] - bucket
+   * @param {number} [maxKeys=1000] - 每次请求最大数量
+   * @returns {Promise<string[]>} 对象键列表
+   */
+  async listObjects(prefix, bucketName = null, maxKeys = 1000) {
+    const allKeys = [];
+    let continuationToken = undefined;
+
+    while (true) {
+      const command = new ListObjectsV2Command({
+        Bucket: bucketName || this._bucket,
+        Prefix: prefix,
+        MaxKeys: maxKeys,
+        ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+      });
+
+      const response = await this._client.send(command);
+      const contents = response.Contents || [];
+
+      for (const item of contents) {
+        // 跳过目录标记（以 / 结尾的空对象）
+        if (!item.Key.endsWith('/')) {
+          allKeys.push(item.Key);
+        }
+      }
+
+      if (response.IsTruncated) {
+        continuationToken = response.NextContinuationToken;
+      } else {
+        break;
+      }
+    }
+
+    return allKeys;
+  }
+
+  /**
+   * 批量下载目录到本地（Node.js 环境）
+   * @param {string} prefix - OSS 前缀
+   * @param {string} localDir - 本地目录
+   * @param {Object} [options={}]
+   * @param {string} [options.bucket] - bucket
+   * @param {boolean} [options.flat=false] - 是否扁平化（所有文件放同一目录）
+   * @returns {Promise<{downloaded: string[], failed: string[]}>}
+   */
+  async downloadDirectory(prefix, localDir, { bucket, flat = false } = {}) {
+    const path = await import('path');
+    const keys = await this.listObjects(prefix, bucket);
+    const downloaded = [];
+    const failed = [];
+
+    for (const key of keys) {
+      try {
+        const relativePath = flat
+          ? path.default.basename(key)
+          : (key.startsWith(prefix) ? key.substring(prefix.length) : key);
+        const localPath = path.default.join(localDir, relativePath);
+        await this.downloadToFile(key, localPath, bucket);
+        downloaded.push(localPath);
+      } catch (err) {
+        console.error(`下载失败 ${key}: ${err.message}`);
+        failed.push(key);
+      }
+    }
+
+    return { downloaded, failed };
   }
 
   /**
