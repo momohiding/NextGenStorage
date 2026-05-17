@@ -10,3 +10,15 @@ build/
 git_debug.txt
 _test_result.txt
 node_modules/
+
+# Logs
+*.log
+
+# Sensitive
+*.pem
+*.key
+
+# Local scratch
+/_scratch/
+/logs/
+.DS_Store
